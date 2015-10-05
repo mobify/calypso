@@ -30,7 +30,7 @@ setup(
     author="Sebastian Vetter",
     author_email="seb@mobify.com",
     url="https://calypso.readthedocs.org",
-    package=['calypso'],
+    packages=['calypso'],
     install_requires=requires,
     entry_points={'console_scripts': [
         'calypso = calypso.cli:main']},

@@ -36,6 +36,17 @@ Deploy image to environment
     $ calypso test_env deploy <test_env_name>
 
 
+Development
+===========
+
+
+Install the `calypso` package in development mode with the `test` requirements:
+
+.. code:: bash
+
+    $ pip install -e ".[test]"
+
+
 License
 =======
 
