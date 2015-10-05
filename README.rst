@@ -2,8 +2,8 @@ calypso
 #######
 
 
-.. image:: https://travis-ci.org//calypso.svg?branch=master
-   :target: https://travis-ci.org//calypso
+.. image:: https://travis-ci.org/mobify/calypso.svg?branch=master
+   :target: https://travis-ci.org/mobify/calypso
 
 
 `calypso` is a small commandline client that streamlines the use of
@@ -41,4 +41,4 @@ License
 
 This code is licensed under the `MIT License`_.
 
-.. _`MIT License`: https://github.com//calypso/blob/master/LICENSE
+.. _`MIT License`: https://github.com/mobify/calypso/blob/master/LICENSE
