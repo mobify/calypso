@@ -319,5 +319,16 @@ def deploy(version, environment_name):
 
 @click.command()
 @click.argument('environment_name')
-def destroy(environment_name):
-    pass
+@click.option('--keep-resources', is_flag=True, default=False)
+def destroy(environment_name, keep_resources):
+    beanstalk = get_client('elasticbeanstalk')
+
+    click.confirm(
+        "Are you sure you want to terminate all '{}' environments?".format(
+            environment_name), abort=True)
+
+    for env_type, env_config in ENVIRONMENT_TYPES.iteritems():
+        env_name = get_environment_name(environment_name, env_type)
+
+        beanstalk.terminate_environment(EnvironmentName=env_name,
+                                        TerminateResources=(not keep_resources))
