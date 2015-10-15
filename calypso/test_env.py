@@ -4,13 +4,13 @@ from __future__ import absolute_import
 import os
 import time
 import click
-import boto3
 import subprocess
+
+from .aws import get_client
 
 
 APPLICATION_NAME = 'portal_staging'
 TEMPLATE_NAME = 'staging_branch_template'
-AWS_REGION = 'us-east-1'
 
 DB_SECURITY_GROUP = 'portalstaging'
 EC2_GROUP_OWNER_ID="787649934531"
@@ -62,13 +62,6 @@ def get_env_var(key, value):
     return {'OptionName': key,
             'Namespace': 'aws:elasticbeanstalk:application:environment',
             'Value': value}
-
-
-def get_client(service):
-    return boto3.client(service,
-                        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                        region_name=AWS_REGION)
 
 
 def allow_rds_access(environment):
