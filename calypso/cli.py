@@ -28,3 +28,11 @@ def aws():
 
 
 aws.add_command(aws_commands.instances)
+
+
+@main.group()
+def cleanup():
+    pass
+
+
+cleanup.add_command(cleanup_commands.app_versions)
