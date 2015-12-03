@@ -2,13 +2,17 @@
 from __future__ import absolute_import, print_function
 import click
 
+from .config import Settings
 from . import aws_commands
+from . import cleanup as cleanup_commands
 from . import test_env as test_env_commands
 
 
 @click.group()
-def main():
-    pass
+@click.option('--config', default='calypso.yml')
+@click.pass_context
+def main(ctx, config):
+    ctx.obj = {'settings': Settings(config)}
 
 
 @main.group()

@@ -6,56 +6,8 @@ import time
 import click
 import subprocess
 
+
 from .aws import get_client
-
-
-APPLICATION_NAME = 'portal_staging'
-TEMPLATE_NAME = 'staging_branch_template'
-
-DB_SECURITY_GROUP = 'portalstaging'
-EC2_GROUP_OWNER_ID="787649934531"
-
-
-ENVIRONMENT_TYPES = {
-    'web': {
-        'run_type': 'WEB DEV_DB',
-        'template_env_name': 'portalStaging-env',
-    },
-    'wrk': {
-        'run_type': 'WORKER',
-        'template_env_name': 'portalStagingWorker-env',
-    },
-    'mon': {
-        'run_type': 'MONITOR',
-        'template_env_name': 'portalStagingMonitor',
-    }
-}
-
-OVERRIDE_VARIABLES = (
-    'HOSTNAME',
-    'BRANCH',
-    'DATABASE_URL',
-    'CACHE_URL',
-    'RUN_TYPE',
-    'BROKER_HASH',
-)
-
-WHITELISTED_SETTINGS = (
-    'EC2KeyName',
-    'IamInstanceProfile',
-    'InstanceType',
-    'SSHSourceRestriction',
-    'Application Healthcheck URL',
-    'EnvironmentVariables',
-)
-
-
-TEST_ENV_OPTIONS = [
-    # Set environment type to 'SingleInstance' to prevent autoscaling
-    {'OptionName': 'EnvironmentType',
-     'Namespace': 'aws:elasticbeanstalk:environment',
-     'Value': 'SingleInstance'},
-]
 
 
 def get_env_var(key, value):
@@ -85,8 +37,7 @@ def allow_rds_access(environment):
         DBSecurityGroupName=DB_SECURITY_GROUP,
         EC2SecurityGroupName=group['GroupName'],
         EC2SecurityGroupOwnerId=EC2_GROUP_OWNER_ID)
-
-    print response
+    print(response)
 
 
 def clone_environment(app_name, template_env_name, new_env_name, env_config,
@@ -101,7 +52,8 @@ def clone_environment(app_name, template_env_name, new_env_name, env_config,
         ApplicationName=app_name,
         EnvironmentName=template_env_name).get('ConfigurationSettings', [])[0]
 
-    print 'Retrieved settings and env details for', template_env_name
+    click.echo(
+        'Retrieved settings and env details for {}'.format(template_env_name))
 
     option_settings = []
     for option in template_settings.get('OptionSettings', []):
@@ -119,7 +71,7 @@ def clone_environment(app_name, template_env_name, new_env_name, env_config,
 
     base_url, __ = template_database_url.rsplit('/', 1)
     database_url = '{base_url}/{name}'.format(base_url=base_url,
-                                              name=branch_name)
+                                              name=branch_name.replace('-', '_'))
 
     cache_url = '{base_url}?key_prefix%3D{name}'.format(base_url=template_cache_url,
                                                         name=branch_name)
@@ -130,12 +82,13 @@ def clone_environment(app_name, template_env_name, new_env_name, env_config,
         get_env_var('BROKER_HASH', branch_name),
         get_env_var('DATABASE_URL', database_url),
         get_env_var('CACHE_URL', cache_url),
+        get_env_var('CELERY_QUEUES', branch_name),
     ] + TEST_ENV_OPTIONS
 
     env_option_settings = list(option_settings)
-    env_option_settings += [
-        get_env_var('RUN_TYPE', env_config['run_type'])
-    ]
+
+    for key, value in env_config.get('environment', {}).iteritems():
+        env_option_settings.append(get_env_var(key, value))
 
     return beanstalk.create_environment(
         ApplicationName=app_name,
@@ -155,8 +108,25 @@ def get_environment_name(branch_name, _type):
 @click.command()
 @click.option('--branch', default=None)
 @click.argument('environment_name')
-def create(branch, environment_name):
+@click.pass_context
+def create(ctx, branch, environment_name):
     beanstalk = get_client('elasticbeanstalk')
+    settings = ctx.obj['settings']
+
+    template_settings = settings.get('environment-template')
+    if not template_settings:
+        raise click.ClickException(
+            "creating a test environment requires a 'environment-template' "
+            "in the settings file")
+
+    application_name = template_settings.get('application')
+
+    if not template_settings:
+        raise click.ClickException(
+            'no application name set for environment template')
+
+    # FIXME: We need to setup a loadbalancer otherwise, the whole thing won't
+    # work
 
     # TODO: generate a new password for the DB and update the DATABASE_URL
 
@@ -174,12 +144,14 @@ def create(branch, environment_name):
     click.echo('Creating env for branch: {}'.format(branch_name))
 
     beanstalk_envs = beanstalk.describe_environments(
-        ApplicationName=APPLICATION_NAME).get('Environments', [])
+        ApplicationName=application_name).get('Environments', [])
 
     existing_envs = [e.get('EnvironmentName') for e in beanstalk_envs]
 
-    for env_type, env_config in ENVIRONMENT_TYPES.iteritems():
-        template_env_name = env_config['template_env_name']
+    environments = template_settings.get('environments', {})
+
+    for env_type, env_config in environments.iteritems():
+        template_env_name = env_config.get('template')
         env_name = get_environment_name(environment_name, env_type)
 
         if env_name in existing_envs:
@@ -199,17 +171,45 @@ def create(branch, environment_name):
         allow_rds_access(new_env)
 
 
-def create_database():
-    pass
-    # create new database on RDS instance
-    # -> currently not done in code
+@click.command()
+@click.argument('environment_name')
+@click.pass_context
+def create_database(context, environment_name):
+    beanstalk = get_client('elasticbeanstalk')
+    rds = get_client('rds')
 
-    # -> pull the MySQL credentials from the DATABASE_URL env var
+    settings = context.obj['settings']
 
-    # -> CREATE DATABASE IF NOT EXISTS <environment_name>;
-    # -> CREATE USER '<environment_name>'@'%' IDENTIFIED BY '<generated pwd>';
-    # -> GRANT ALL PRIVILEGES ON <environment_name>.* TO '<environment_name>'@'%';
-    # -> FLUSH PRIVILEGES;
+    template_settings = settings.get('environment-template')
+    if not template_settings:
+        raise click.ClickException(
+            "creating a test environment requires a 'environment-template' "
+            "in the settings file")
+
+    application_name = template_settings.get('application')
+
+    env_type = template_settings.get('environments', {}).keys()[0]
+    env_name = get_environment_name(environment_name, env_type)
+
+    response = beanstalk.describe_configuration_settings(
+        ApplicationName=application_name,
+        EnvironmentName=env_name).get('ConfigurationSettings', [])[0]
+
+    template_database_url = None
+
+    for option in response.get('OptionSettings', []):
+        if option.get('OptionName') in 'DATABASE_URL':
+            template_database_url = option.get('Value', '')
+            break
+
+    url, database = template_database_url.rsplit('/', 1)
+    db_engine = create_engine(url)
+
+    conn = db_engine.connect()
+
+    db_name = database.replace('-', '_')
+    conn.execute("CREATE DATABASE IF NOT EXISTS {}".format(db_name))
+    conn.close()
 
 
 @click.command()
@@ -217,11 +217,15 @@ def create_database():
 @click.option('--image', default='quay.io/mobify/portal-app')
 @click.option('--nobuild', default=False, is_flag=True)
 @click.argument('environment_name')
-def build(version, image, nobuild, environment_name):
+@click.pass_context
+def build(context, version, image, nobuild, environment_name):
+    settings = context.obj['settings']['environment-template']
 
     if not nobuild:
-        click.echo('Creating new portal app image')
-        subprocess.call(['./portal.sh', 'dev', 'build', 'portal-app'])
+        click.echo('Creating new image')
+
+        for command in settings.get('build', []):
+            subprocess.call(command.split(' '))
 
     if not version:
         git_sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip()
@@ -240,14 +244,26 @@ def build(version, image, nobuild, environment_name):
 @click.command()
 @click.option('--version', default=None)
 @click.argument('environment_name')
-def deploy(version, environment_name):
+@click.pass_context
+def deploy(context, version, environment_name):
     DOCKERRUN_FILE = 'Dockerrun.aws.json'
-    EB_BUCKET = 'mobify-cloud-dockerfiles'
 
-    branch_name = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).strip()
+    settings = context.obj['settings']['environment-template']
+
+    application_name = settings['application']
+    bucket_name = settings['deploy'].get('bucket', '')
+    env_types = settings['environments'].keys()
+
+    if not bucket_name:
+        raise click.ClickException(
+            'no bucket name specified for Beanstalk deployment')
+
+    git_command = ['git', 'rev-parse', '--abbrev-ref', 'HEAD']
+    branch_name = subprocess.check_output(git_command).strip()
 
     if not version:
-        git_sha = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).strip()
+        version_command = ['git', 'rev-parse', '--short', 'HEAD']
+        git_sha = subprocess.check_output(version_command).strip()
         version = '{}-{}'.format(git_sha, environment_name)
 
     if len(environment_name) > 19:
@@ -255,7 +271,7 @@ def deploy(version, environment_name):
 
     beanstalk = get_client('elasticbeanstalk')
     beanstalk_envs = beanstalk.describe_environments(
-        ApplicationName=APPLICATION_NAME).get('Environments', [])
+        ApplicationName=application_name).get('Environments', [])
 
     existing_envs = [e.get('EnvironmentName') for e in beanstalk_envs]
     if '{}-web'.format(environment_name) not in existing_envs:
@@ -265,7 +281,7 @@ def deploy(version, environment_name):
     click.echo("Deploying {} as {}".format(branch_name, version))
 
     BEANSTALK_DEPLOY_ZIP = '{app_name}_{version}.zip'.format(
-        app_name=APPLICATION_NAME,
+        app_name=application_name,
         version=version)
 
     # create dockerrun file
@@ -283,7 +299,7 @@ def deploy(version, environment_name):
     click.echo('Uploading beanstalk ZIP to S3.')
 
     s3 = get_client('s3')
-    s3.upload_file(BEANSTALK_DEPLOY_ZIP, EB_BUCKET, BEANSTALK_DEPLOY_ZIP)
+    s3.upload_file(BEANSTALK_DEPLOY_ZIP, bucket_name, BEANSTALK_DEPLOY_ZIP)
 
     description = "Test version for {} created from branch '{}'".format(
         environment_name,
@@ -291,14 +307,14 @@ def deploy(version, environment_name):
 
     click.echo('Create new version label: {}'.format(version))
     beanstalk.create_application_version(
-        ApplicationName=APPLICATION_NAME,
+        ApplicationName=application_name,
         VersionLabel=version,
-        SourceBundle={'S3Bucket': EB_BUCKET,
+        SourceBundle={'S3Bucket': bucket_name,
                       'S3Key': BEANSTALK_DEPLOY_ZIP},
         Description=description,
     )
 
-    for env_type in ENVIRONMENT_TYPES.iterkeys():
+    for env_type in env_types:
         env_name = get_environment_name(environment_name, env_type)
 
         click.echo("Updating environment {}".format(env_name))
@@ -313,14 +329,18 @@ def deploy(version, environment_name):
 @click.command()
 @click.argument('environment_name')
 @click.option('--keep-resources', is_flag=True, default=False)
-def destroy(environment_name, keep_resources):
+@click.pass_context
+def destroy(context, environment_name, keep_resources):
     beanstalk = get_client('elasticbeanstalk')
+
+    settings = context.obj['settings']['environment-template']
+    env_types = settings['environments'].keys()
 
     click.confirm(
         "Are you sure you want to terminate all '{}' environments?".format(
             environment_name), abort=True)
 
-    for env_type, env_config in ENVIRONMENT_TYPES.iteritems():
+    for env_type in env_types:
         env_name = get_environment_name(environment_name, env_type)
 
         beanstalk.terminate_environment(EnvironmentName=env_name,
