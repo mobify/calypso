@@ -48,3 +48,28 @@ def instances(environment):
         click.echo("Public DNS: {}".format(instance))
 
     click.echo()
+
+
+@click.command()
+@click.argument('app')
+@click.argument('command')
+@click.pass_context
+def run(context, app, command):
+    settings = context.obj['settings']['apps'][app]
+
+    env_name = settings['web']['name']
+
+    ec2 = get_client('ec2')
+
+    hostname = instance_for_environment(ec2, env_name)[0]
+
+    from fabric.api import env, run, sudo, settings
+
+    env.host_string = hostname
+    env.user = 'ec2-user'
+    env.key_filename = '~/.ssh/portal_ec2s.pem'
+
+    with settings():
+        container_id = sudo('docker ps | grep aws_beanstalk').split(' ')[0]
+
+        sudo('docker exec -it {} {}'.format(container_id, command))

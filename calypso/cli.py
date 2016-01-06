@@ -11,8 +11,11 @@ from . import test_env as test_env_commands
 @click.group()
 @click.option('--config', default='calypso.yml')
 @click.pass_context
-def main(ctx, config):
-    ctx.obj = {'settings': Settings(config)}
+def main(ctx, config=None):
+    if not config:
+        ctx.obj = {}
+    else:
+        ctx.obj = {'settings': Settings(config)}
 
 
 @main.group()
@@ -21,6 +24,7 @@ def test_env():
 
 
 test_env.add_command(test_env_commands.create)
+test_env.add_command(test_env_commands.create_database)
 test_env.add_command(test_env_commands.build)
 test_env.add_command(test_env_commands.deploy)
 test_env.add_command(test_env_commands.destroy)
@@ -32,6 +36,7 @@ def aws():
 
 
 aws.add_command(aws_commands.instances)
+aws.add_command(aws_commands.run)
 
 
 @main.group()

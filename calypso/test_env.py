@@ -6,6 +6,7 @@ import time
 import click
 import subprocess
 
+from sqlalchemy import create_engine
 
 from .aws import get_client
 
