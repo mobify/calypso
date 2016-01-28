@@ -4,7 +4,7 @@ import sys
 from setuptools import setup
 from setuptools.command.test import test as TestCommand
 
-requires = ['click', 'boto3', 'sqlalchemy', 'fabric']
+requires = ['click', 'boto3', 'sqlalchemy', 'fabric', 'pyyaml']
 tests_require = ['pytest', 'pytest-cache', 'pytest-cov', 'betamax']
 
 
