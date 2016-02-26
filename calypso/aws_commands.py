@@ -63,13 +63,13 @@ def run(context, app, command):
 
     hostname = instance_for_environment(ec2, env_name)[0]
 
-    from fabric.api import env, run, sudo, settings
+    from fabric.api import env, sudo, settings
 
     env.host_string = hostname
     env.user = 'ec2-user'
     env.key_filename = '~/.ssh/portal_ec2s.pem'
+    env.output_prefix = False
 
     with settings():
-        container_id = sudo('docker ps | grep aws_beanstalk').split(' ')[0]
-
+        container_id = sudo('cat /etc/elasticbeanstalk/.aws_beanstalk.current-container-id')  # noqa
         sudo('docker exec -it {} {}'.format(container_id, command))
